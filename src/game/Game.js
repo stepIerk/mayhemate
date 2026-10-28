@@ -1,6 +1,9 @@
 import { Piece } from './Piece.js';
-
+import { Deck } from './deck.js';
 const BOARD_SIZE = 8;
+
+const MAX_MAX_TEMPO = 5;
+
 
 const PAWN_DIRECTION = {
   white: -1,
@@ -25,10 +28,37 @@ const BACK_RANK = [
 
 export class Game {
   constructor() {
+    this.version = 1;
     this.pieces = [];
     this.turn = 'white';
     this.nextId = 1;
     this.createInitialPieces();
+    this.deck = [];
+    this.initializeDeck();
+
+    this.turnMove = [];
+    this.movedThisTurn = false;
+    this.movedThisTurn = false;
+    this.turnCount = 1;
+
+    this.maxTempo = 1;
+
+    this.heroes = {
+        'white': {
+            tempo: this.maxTempo,
+        },
+        'black': {
+            tempo: this.maxTempo,
+        }
+
+    }
+        
+    
+  }
+
+
+  initializeDeck(){
+    this.deck = Deck;
   }
 
   addPiece(type, col, row, color) {
@@ -59,8 +89,10 @@ export class Game {
 
   applyAction(action) {
     switch (action?.type) {
+      case 'MOVE':
       case 'move':
         return this.applyMove(action);
+      case 'END_TURN':
       case 'endTurn':
         return this.applyEndTurn();
       default:
@@ -77,6 +109,14 @@ export class Game {
 
     if (!this.canAct(piece)) {
       return { ok: false, reason: 'not-your-turn' };
+    }
+    const hero = this.heroes[piece.color]
+
+    if (this.turnMove.includes(piece.id)) {
+      return { ok: false, reason: 'already-moved' };
+    }
+    if (hero.tempo <= 0) {
+      return { ok: false, reason: 'no-tempo' };
     }
 
     if (!this.isLegalMove(piece, col, row)) {
@@ -99,6 +139,9 @@ export class Game {
         row: target.row,
         color: target.color,
       });
+
+      this.updateTempo(piece.color, -1);
+      this.turnMove.push(piece.id);
 
       if (target.hp <= 0) {
         this.removePiece(target);
@@ -123,6 +166,10 @@ export class Game {
       return { ok: true, result: 'attack', events };
     }
 
+    if (this.movedThisTurn) {
+      return { ok: false, reason: 'already-moved' };
+    }
+
     this.movePiece(piece, col, row);
     events.push({
       type: 'move',
@@ -130,6 +177,9 @@ export class Game {
       from,
       to: { col, row },
     });
+    this.turnMove.push(piece.id);
+    this.movedThisTurn = true;
+    this.updateTempo(piece.color, -1);
     return { ok: true, result: 'move', events };
   }
 
@@ -230,13 +280,26 @@ export class Game {
   }
 
   canAct(piece) {
-    return piece?.color === this.turn;
+    
+    if(piece?.color !== this.turn) return false;
+
+    return true
   }
 
   getLegalMoves(piece) {
+
     if (!this.canAct(piece)) {
       return [];
     }
+
+    if (this.turnMove.includes(piece.id)) {
+      return [];
+    }
+
+    if (this.getTempo(piece.color) === 0) {
+      return [];
+    }
+
 
     const moves = [];
 
@@ -246,10 +309,15 @@ export class Game {
           continue;
         }
 
+        const isAttack = Boolean(this.getPieceAt(col, row));
+        if (!isAttack && this.movedThisTurn) {
+          continue;
+        }
+
         moves.push({
           col,
           row,
-          type: this.getPieceAt(col, row) ? 'attack' : 'move',
+          type: isAttack ? 'attack' : 'move',
         });
       }
     }
@@ -266,8 +334,9 @@ export class Game {
     }
   }
 
-  getState() {
+  toState() {
     return {
+      version: this.version,
       turn: this.turn,
       nextId: this.nextId,
       pieces: this.pieces.map((piece) => ({
@@ -279,7 +348,56 @@ export class Game {
         atk: piece.atk,
         color: piece.color,
       })),
+      turnMove: this.turnMove,
+      movedThisTurn: this.movedThisTurn,
+      heroes: this.heroes,
+      turnCount: this.turnCount,
+      maxTempo: this.maxTempo,
     };
+  }
+
+  getState() {
+    return this.toState();
+  }
+
+  static fromState(state) {
+    const game = Object.create(Game.prototype);
+    game.version = state?.version ?? 1;
+    game.pieces = [];
+    game.turn = state?.turn ?? 'white';
+    game.nextId = state?.nextId ?? 1;
+
+    game.turnMove = Array.isArray(state?.turnMove) ? [...state.turnMove] : [];
+    game.movedThisTurn = Boolean(state?.movedThisTurn);
+
+    game.heroes = state?.heroes ?? {};
+    game.turnCount = state?.turnCount ?? 1;
+    game.maxTempo = state?.maxTempo ?? 1;
+
+    if (!game.heroes.white) game.heroes.white = { tempo: game.maxTempo };
+    if (!game.heroes.black) game.heroes.black = { tempo: game.maxTempo };
+    if (typeof game.heroes.white.tempo !== 'number') game.heroes.white.tempo = game.maxTempo;
+    if (typeof game.heroes.black.tempo !== 'number') game.heroes.black.tempo = game.maxTempo;
+
+
+    for (const pieceState of state?.pieces ?? []) {
+      const piece = new Piece(
+        pieceState.id,
+        pieceState.type,
+        pieceState.col,
+        pieceState.row,
+        pieceState.color
+      );
+      piece.hp = pieceState.hp;
+      piece.atk = pieceState.atk;
+      game.pieces.push(piece);
+    }
+
+    if (game.nextId <= Math.max(0, ...game.pieces.map((piece) => piece.id))) {
+      game.nextId = Math.max(0, ...game.pieces.map((piece) => piece.id)) + 1;
+    }
+
+    return game;
   }
 
   getTurnColor() {
@@ -287,6 +405,30 @@ export class Game {
   }
 
   endTurn() {
+    this.turnMove = [];
+    this.movedThisTurn = false;
+    if (this.turn == 'black'){
+        this.turnCount += 1
+    }
+    if (this.maxTempo < MAX_MAX_TEMPO){
+        this.maxTempo = Math.floor(this.turnCount / 2) + 1;
+    }
+    console.log()
+    
     this.turn = this.turn === 'white' ? 'black' : 'white';
+    this.setTempo(this.turn, this.maxTempo)
+
+  }
+
+  updateTempo(color, value) {
+    this.heroes[color].tempo += value
+  }
+
+  setTempo(color, value) {
+    this.heroes[color].tempo = value
+  }
+
+  getTempo(color) {
+    return this.heroes[color].tempo
   }
 }
