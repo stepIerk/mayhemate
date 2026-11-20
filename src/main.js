@@ -3,6 +3,7 @@ import HomeScene from './scenes/HomeScene.js';
 import GameScene from './scenes/GameScene.js';
 import { BottomUiScene } from './scenes/BottomUiScene.js';
 import { BootScene } from './scenes/BootScene.js';
+import { LobbyScene } from './scenes/LobbyScene.js';
 import './style.css';
 
 const config = {
@@ -15,7 +16,7 @@ const config = {
     width: '100%',
     height: '100%',
   },
-  scene: [HomeScene, BootScene, GameScene, BottomUiScene],
+  scene: [HomeScene, BootScene, LobbyScene, GameScene, BottomUiScene],
 };
 
 new Phaser.Game(config);

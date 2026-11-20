@@ -1,5 +1,9 @@
 import { Piece } from './Piece.js';
-import { Deck } from './deck.js';
+import { CardState, findCardDefinition, getCardCatalog } from './deck.js';
+import { dealDamage, removePiece } from './damage.js';
+import { applyEffects, areaCells, validateRequires } from './effects.js';
+import { nextRandom } from './rng.js';
+import { checkTraps } from './traps.js';
 const BOARD_SIZE = 8;
 
 const MAX_MAX_TEMPO = 5;
@@ -26,6 +30,23 @@ const BACK_RANK = [
   'rook',
 ];
 
+function numberOr(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : fallback;
+}
+
+function cloneGraveyard(graveyard) {
+  return {
+    white: Array.isArray(graveyard?.white)
+      ? graveyard.white.map((entry) => ({ ...entry }))
+      : [],
+    black: Array.isArray(graveyard?.black)
+      ? graveyard.black.map((entry) => ({ ...entry }))
+      : [],
+  };
+}
+
 export class Game {
   constructor() {
     this.version = 1;
@@ -33,11 +54,9 @@ export class Game {
     this.turn = 'white';
     this.nextId = 1;
     this.createInitialPieces();
-    this.deck = [];
-    this.initializeDeck();
+    this.cards = CardState.create(getCardCatalog().cards);
 
     this.turnMove = [];
-    this.movedThisTurn = false;
     this.movedThisTurn = false;
     this.turnCount = 1;
 
@@ -52,26 +71,21 @@ export class Game {
         }
 
     }
-        
-    
+
+    this.graveyard = { white: [], black: [] };
+    this.traps = [];
+    this.tempoMod = { white: 0, black: 0 };
+    this.rngState = Math.floor(Math.random() * 0xffffffff) >>> 0;
+    this.nextPieceId = 1;
+    this.nextTrapId = 1;
+    this.gameOver = null;
   }
 
-
-  initializeDeck(){
-    this.deck = Deck;
-  }
 
   addPiece(type, col, row, color) {
     const piece = new Piece(this.nextId++, type, col, row, color);
     this.pieces.push(piece);
     return piece;
-  }
-
-  removePiece(piece) {
-    const index = this.pieces.indexOf(piece);
-    if (index !== -1) {
-      this.pieces.splice(index, 1);
-    }
   }
 
   getPieceAt(col, row) {
@@ -87,7 +101,39 @@ export class Game {
     piece.row = newRow;
   }
 
+  pushEvent(event) {
+    if (Array.isArray(this.eventBuffer)) {
+      this.eventBuffer.push(event);
+    }
+  }
+
+  takeEvents() {
+    const events = Array.isArray(this.eventBuffer)
+      ? this.eventBuffer
+      : [];
+    this.eventBuffer = null;
+    return events;
+  }
+
   applyAction(action) {
+    this.eventBuffer = [];
+    const result = this.applyActionInner(action);
+
+    if (!result?.ok) {
+      this.eventBuffer = null;
+      return result;
+    }
+
+    const events = [
+      ...(result.events ?? []),
+      ...this.takeEvents(),
+    ];
+    delete result.events;
+
+    return { ...result, events };
+  }
+
+  applyActionInner(action) {
     switch (action?.type) {
       case 'MOVE':
       case 'move':
@@ -95,6 +141,9 @@ export class Game {
       case 'END_TURN':
       case 'endTurn':
         return this.applyEndTurn();
+      case 'PLAY_CARD':
+      case 'playCard':
+        return this.applyPlayCard(action);
       default:
         return { ok: false, reason: 'unknown-action' };
     }
@@ -110,6 +159,11 @@ export class Game {
     if (!this.canAct(piece)) {
       return { ok: false, reason: 'not-your-turn' };
     }
+
+    if (piece.status?.frozen) {
+      return { ok: false, reason: 'frozen' };
+    }
+
     const hero = this.heroes[piece.color]
 
     if (this.turnMove.includes(piece.id)) {
@@ -125,15 +179,18 @@ export class Game {
 
     const from = { col: piece.col, row: piece.row };
     const target = this.getPieceAt(col, row);
-    const events = [];
 
     if (target) {
-      target.damage(piece.atk);
-      events.push({
+      const attack = dealDamage(this, target, piece.effAtk, {
+        attacker: piece,
+      });
+
+      this.pushEvent({
         type: 'attack',
         attackerId: piece.id,
         targetId: target.id,
-        damage: piece.atk,
+        damage: attack.dealt,
+        blocked: attack.blocked,
         hp: target.hp,
         col: target.col,
         row: target.row,
@@ -143,27 +200,28 @@ export class Game {
       this.updateTempo(piece.color, -1);
       this.turnMove.push(piece.id);
 
-      if (target.hp <= 0) {
-        this.removePiece(target);
-        this.movePiece(piece, col, row);
-        events.push({
-          type: 'kill',
-          pieceId: target.id,
-          byId: piece.id,
-          col,
-          row,
-          color: target.color,
-        });
-        events.push({
-          type: 'move',
-          pieceId: piece.id,
-          from,
-          to: { col, row },
-        });
-        return { ok: true, result: 'kill', events };
+      const attackerAlive = this.pieces.includes(piece);
+
+      if (attack.died) {
+        if (attackerAlive) {
+          this.movePiece(piece, col, row);
+          this.pushEvent({
+            type: 'move',
+            pieceId: piece.id,
+            from,
+            to: { col, row },
+          });
+          checkTraps(this, piece);
+        }
+
+        return { ok: true, result: 'kill' };
       }
 
-      return { ok: true, result: 'attack', events };
+      if (!attackerAlive) {
+        return { ok: true, result: 'kill' };
+      }
+
+      return { ok: true, result: 'attack' };
     }
 
     if (this.movedThisTurn) {
@@ -171,25 +229,93 @@ export class Game {
     }
 
     this.movePiece(piece, col, row);
-    events.push({
+    this.pushEvent({
       type: 'move',
       pieceId: piece.id,
       from,
       to: { col, row },
     });
+    checkTraps(this, piece);
     this.turnMove.push(piece.id);
     this.movedThisTurn = true;
     this.updateTempo(piece.color, -1);
-    return { ok: true, result: 'move', events };
+    return { ok: true, result: 'move' };
   }
 
   applyEndTurn() {
     this.endTurn();
+    this.pushEvent({ type: 'turn', turn: this.turn });
     return {
       ok: true,
       result: 'endTurn',
-      events: [{ type: 'turn', turn: this.turn }],
+      events: [],
     };
+  }
+
+  applyPlayCard({ cardUid, col, row }) {
+    const color = this.turn;
+
+    if (!this.hasCard(color, cardUid)) {
+      return { ok: false, reason: 'card-not-in-hand' };
+    }
+
+    if (
+      !Number.isInteger(col) ||
+      !Number.isInteger(row) ||
+      !this.isInsideBoard(col, row)
+    ) {
+      return { ok: false, reason: 'invalid-target' };
+    }
+
+    const inHand = this.cards.hands[color].find(
+      (card) => card.uid === cardUid
+    );
+    const definition = findCardDefinition(inHand?.cardId);
+    const cost = definition?.cost ?? 0;
+    const hero = this.heroes[color];
+
+    if (hero.tempo < cost) {
+      return { ok: false, reason: 'no-tempo' };
+    }
+
+    if (!validateRequires(this, definition?.requires, color, col, row)) {
+      return { ok: false, reason: 'invalid-target' };
+    }
+
+    const card = this.cards.play(color, cardUid, { col, row });
+
+    if (!card) {
+      return { ok: false, reason: 'card-not-in-hand' };
+    }
+
+    this.updateTempo(color, -cost);
+
+    this.pushEvent({
+      type: 'card',
+      cardId: card.cardId,
+      cardUid: card.uid,
+      color,
+      col,
+      row,
+    });
+
+    applyEffects(this, definition?.effects, {
+      state: this,
+      caster: color,
+      col,
+      row,
+      rng: () => nextRandom(this),
+    });
+
+    return {
+      ok: true,
+      result: 'card',
+      events: [],
+    };
+  }
+
+  hasCard(color, cardUid) {
+    return this.cards?.hasInHand(color, cardUid) ?? false;
   }
 
   isLegalMove(piece, newCol, newRow) {
@@ -292,6 +418,10 @@ export class Game {
       return [];
     }
 
+    if (piece.status?.frozen) {
+      return [];
+    }
+
     if (this.turnMove.includes(piece.id)) {
       return [];
     }
@@ -339,20 +469,23 @@ export class Game {
       version: this.version,
       turn: this.turn,
       nextId: this.nextId,
-      pieces: this.pieces.map((piece) => ({
-        id: piece.id,
-        type: piece.type,
-        col: piece.col,
-        row: piece.row,
-        hp: piece.hp,
-        atk: piece.atk,
-        color: piece.color,
-      })),
-      turnMove: this.turnMove,
+      pieces: this.pieces.map((piece) => piece.toState()),
+      turnMove: [...this.turnMove],
       movedThisTurn: this.movedThisTurn,
-      heroes: this.heroes,
+      heroes: {
+        white: { ...this.heroes.white },
+        black: { ...this.heroes.black },
+      },
       turnCount: this.turnCount,
       maxTempo: this.maxTempo,
+      cards: this.cards.toState(),
+      graveyard: cloneGraveyard(this.graveyard),
+      traps: this.traps.map((trap) => ({ ...trap })),
+      tempoMod: { ...this.tempoMod },
+      rngState: this.rngState,
+      nextPieceId: this.nextPieceId,
+      nextTrapId: this.nextTrapId,
+      gameOver: this.gameOver ? { ...this.gameOver } : null,
     };
   }
 
@@ -369,32 +502,54 @@ export class Game {
 
     game.turnMove = Array.isArray(state?.turnMove) ? [...state.turnMove] : [];
     game.movedThisTurn = Boolean(state?.movedThisTurn);
+    game.cards = CardState.fromState(
+      state?.cards,
+      getCardCatalog().cards
+    );
 
-    game.heroes = state?.heroes ?? {};
     game.turnCount = state?.turnCount ?? 1;
     game.maxTempo = state?.maxTempo ?? 1;
+    game.heroes = {
+      white: {
+        tempo:
+          typeof state?.heroes?.white?.tempo === 'number'
+            ? state.heroes.white.tempo
+            : game.maxTempo,
+      },
+      black: {
+        tempo:
+          typeof state?.heroes?.black?.tempo === 'number'
+            ? state.heroes.black.tempo
+            : game.maxTempo,
+      },
+    };
 
-    if (!game.heroes.white) game.heroes.white = { tempo: game.maxTempo };
-    if (!game.heroes.black) game.heroes.black = { tempo: game.maxTempo };
-    if (typeof game.heroes.white.tempo !== 'number') game.heroes.white.tempo = game.maxTempo;
-    if (typeof game.heroes.black.tempo !== 'number') game.heroes.black.tempo = game.maxTempo;
-
+    game.graveyard = cloneGraveyard(state?.graveyard);
+    game.traps = Array.isArray(state?.traps)
+      ? state.traps.map((trap) => ({ ...trap }))
+      : [];
+    game.tempoMod = {
+      white: numberOr(state?.tempoMod?.white, 0),
+      black: numberOr(state?.tempoMod?.black, 0),
+    };
+    game.rngState = numberOr(state?.rngState, 0) >>> 0;
+    game.nextPieceId = numberOr(state?.nextPieceId, 1);
+    game.nextTrapId = numberOr(state?.nextTrapId, 1);
+    game.gameOver = state?.gameOver ? { ...state.gameOver } : null;
 
     for (const pieceState of state?.pieces ?? []) {
-      const piece = new Piece(
-        pieceState.id,
-        pieceState.type,
-        pieceState.col,
-        pieceState.row,
-        pieceState.color
-      );
-      piece.hp = pieceState.hp;
-      piece.atk = pieceState.atk;
-      game.pieces.push(piece);
+      game.pieces.push(Piece.fromState(pieceState));
     }
 
-    if (game.nextId <= Math.max(0, ...game.pieces.map((piece) => piece.id))) {
-      game.nextId = Math.max(0, ...game.pieces.map((piece) => piece.id)) + 1;
+    const maxNumericId = Math.max(
+      0,
+      ...game.pieces
+        .map((piece) => piece.id)
+        .filter((id) => typeof id === 'number')
+    );
+
+    if (game.nextId <= maxNumericId) {
+      game.nextId = maxNumericId + 1;
     }
 
     return game;
@@ -405,6 +560,29 @@ export class Game {
   }
 
   endTurn() {
+    const endingColor = this.turn;
+
+    for (const piece of this.pieces) {
+      piece.tempAtk = 0;
+
+      const frozen = piece.status?.frozen;
+      if (frozen && piece.color === endingColor) {
+        frozen.turns -= 1;
+        if (frozen.turns <= 0) {
+          delete piece.status.frozen;
+          this.pushEvent({
+            type: 'status',
+            id: piece.id,
+            status: 'frozen',
+            removed: true,
+            col: piece.col,
+            row: piece.row,
+            color: piece.color,
+          });
+        }
+      }
+    }
+
     this.turnMove = [];
     this.movedThisTurn = false;
     if (this.turn == 'black'){
@@ -413,11 +591,116 @@ export class Game {
     if (this.maxTempo < MAX_MAX_TEMPO){
         this.maxTempo = Math.floor(this.turnCount / 2) + 1;
     }
-    console.log()
     
     this.turn = this.turn === 'white' ? 'black' : 'white';
-    this.setTempo(this.turn, this.maxTempo)
 
+    const mod = this.tempoMod[this.turn];
+    if (mod !== 0) {
+      this.tempoMod[this.turn] = 0;
+    }
+    const nextTempo = Math.min(
+      MAX_MAX_TEMPO,
+      Math.max(1, this.maxTempo + mod)
+    );
+    this.setTempo(this.turn, nextTempo);
+    this.cards.draw(this.turn, 1);
+
+    this.tickStatuses(this.turn);
+  }
+
+  tickStatuses(color) {
+    for (const piece of [...this.pieces]) {
+      if (!this.pieces.includes(piece)) {
+        continue;
+      }
+      const poison = piece.status?.poison;
+      if (!poison || piece.color !== color) {
+        continue;
+      }
+
+      dealDamage(this, piece, poison.damage, { pierce: true });
+
+      if (!this.pieces.includes(piece)) {
+        continue;
+      }
+
+      poison.turns -= 1;
+      if (poison.turns <= 0) {
+        delete piece.status.poison;
+        this.pushEvent({
+          type: 'status',
+          id: piece.id,
+          status: 'poison',
+          removed: true,
+          col: piece.col,
+          row: piece.row,
+          color: piece.color,
+        });
+      }
+    }
+
+    for (const piece of [...this.pieces]) {
+      if (!this.pieces.includes(piece)) {
+        continue;
+      }
+      const bomb = piece.status?.bomb;
+      if (!bomb || bomb.by !== color) {
+        continue;
+      }
+
+      bomb.turns -= 1;
+      if (bomb.turns > 0) {
+        continue;
+      }
+
+      delete piece.status.bomb;
+      this.pushEvent({
+        type: 'status',
+        id: piece.id,
+        status: 'bomb',
+        removed: true,
+        col: piece.col,
+        row: piece.row,
+        color: piece.color,
+      });
+
+      const cells = areaCells(bomb.area ?? 'square3', piece.col, piece.row);
+      for (const cell of cells) {
+        const victim = this.getPieceAt(cell.col, cell.row);
+        if (victim) {
+          dealDamage(this, victim, bomb.damage ?? 0, {});
+        }
+      }
+
+      if (bomb.killHolder && this.pieces.includes(piece)) {
+        removePiece(this, piece, {});
+      }
+    }
+
+    for (const piece of [...this.pieces]) {
+      if (!this.pieces.includes(piece)) {
+        continue;
+      }
+      const expire = piece.status?.expire;
+      if (!expire || piece.color !== color) {
+        continue;
+      }
+
+      expire.turns -= 1;
+      if (expire.turns <= 0) {
+        delete piece.status.expire;
+        this.pushEvent({
+          type: 'status',
+          id: piece.id,
+          status: 'expire',
+          removed: true,
+          col: piece.col,
+          row: piece.row,
+          color: piece.color,
+        });
+        removePiece(this, piece, { exile: true });
+      }
+    }
   }
 
   updateTempo(color, value) {

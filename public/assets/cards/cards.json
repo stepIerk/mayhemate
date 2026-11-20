@@ -1,0 +1,889 @@
+{
+  "template": "assets/cards/card_template.png",
+  "back": "assets/cards/card_back.png",
+  "cards": [
+  {
+    "id": "spark",
+    "name": "Искра",
+    "cost": 1,
+    "copies": 3,
+    "art": "",
+    "target": "cell",
+    "text": "1 урон фигуре на клетке.",
+    "requires": {
+      "cell": "piece",
+      "owner": "any"
+    },
+    "effects": [
+      {
+        "op": "damage",
+        "amount": 1
+      }
+    ]
+  },
+  {
+    "id": "lightning",
+    "name": "Молния",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "2 урона вражеской фигуре. Если она погибла — верните 1 темп.",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy"
+    },
+    "effects": [
+      {
+        "op": "damage",
+        "amount": 2,
+        "onKill": [
+          {
+            "op": "tempo",
+            "amount": 1,
+            "who": "self"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "fireball",
+    "name": "Огненный шар",
+    "cost": 3,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "2 урона фигуре на клетке и 1 урон всем соседним. Бьёт и своих.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "damage",
+        "amount": 2,
+        "area": "cell",
+        "filter": {
+          "owner": "any"
+        }
+      },
+      {
+        "op": "damage",
+        "amount": 1,
+        "area": "adjacent8",
+        "filter": {
+          "owner": "any"
+        }
+      }
+    ]
+  },
+  {
+    "id": "volley",
+    "name": "Залп",
+    "cost": 3,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "1 урон всем вражеским фигурам в ряду выбранной клетки.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "damage",
+        "amount": 1,
+        "area": "row",
+        "filter": {
+          "owner": "enemy"
+        }
+      }
+    ]
+  },
+  {
+    "id": "meteor",
+    "name": "Метеорит",
+    "cost": 5,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "3 урона всем фигурам в зоне 3×3. Не щадит никого.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "damage",
+        "amount": 3,
+        "area": "square3",
+        "filter": {
+          "owner": "any"
+        }
+      }
+    ]
+  },
+  {
+    "id": "execute",
+    "name": "Казнь",
+    "cost": 4,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Уничтожьте вражескую фигуру с HP ≤ 3 (кроме короля).",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy",
+      "hpMax": 3,
+      "notTypes": [
+        "king"
+      ]
+    },
+    "effects": [
+      {
+        "op": "kill"
+      }
+    ]
+  },
+  {
+    "id": "poison",
+    "name": "Яд",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Враг отравлен на 3 хода: 1 урон в начале его хода.",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "poison",
+        "turns": 3,
+        "damage": 1
+      }
+    ]
+  },
+  {
+    "id": "time_bomb",
+    "name": "Часовая бомба",
+    "cost": 2,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Через 2 ваших хода вражеская фигура взрывается: 3 урона соседям, сама погибает.",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "bomb",
+        "turns": 2,
+        "damage": 3,
+        "area": "adjacent8",
+        "killHolder": true
+      }
+    ]
+  },
+  {
+    "id": "weaken",
+    "name": "Ослабление",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Вражеская фигура навсегда теряет 1 атаку.",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy"
+    },
+    "effects": [
+      {
+        "op": "buff",
+        "atk": -1,
+        "duration": "permanent"
+      }
+    ]
+  },
+  {
+    "id": "mine",
+    "name": "Мина",
+    "cost": 2,
+    "copies": 3,
+    "art": "",
+    "target": "cell",
+    "text": "Скрытая мина на пустой клетке. Враг, вставший на неё, получает 3 урона.",
+    "requires": {
+      "cell": "empty",
+      "noTrap": true
+    },
+    "effects": [
+      {
+        "op": "place_trap",
+        "trap": "mine",
+        "damage": 3
+      }
+    ]
+  },
+  {
+    "id": "frost_trap",
+    "name": "Ледяная ловушка",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Скрытая ловушка: вставший на неё враг заморожен на 2 хода.",
+    "requires": {
+      "cell": "empty",
+      "noTrap": true
+    },
+    "effects": [
+      {
+        "op": "place_trap",
+        "trap": "frost_trap",
+        "turns": 2
+      }
+    ]
+  },
+  {
+    "id": "mine_field",
+    "name": "Минное поле",
+    "cost": 4,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "3 скрытые мины (по 2 урона) на случайных пустых клетках вражеской половины.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "place_trap",
+        "trap": "mine",
+        "damage": 2,
+        "random": {
+          "count": 3,
+          "zone": "enemy_half"
+        }
+      }
+    ]
+  },
+  {
+    "id": "sapper",
+    "name": "Сапёр",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Обезвредьте ловушку на клетке. Если она была вражеской — возьмите карту.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "destroy_trap",
+        "owner": "enemy",
+        "then": [
+          {
+            "op": "draw",
+            "count": 1,
+            "who": "self"
+          }
+        ]
+      },
+      {
+        "op": "destroy_trap",
+        "owner": "ally"
+      }
+    ]
+  },
+  {
+    "id": "scout",
+    "name": "Разведка",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Вы видите все вражеские ловушки в зоне 5×5 до конца игры.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "reveal_traps",
+        "area": "square5"
+      }
+    ]
+  },
+  {
+    "id": "heal",
+    "name": "Лечение",
+    "cost": 1,
+    "copies": 3,
+    "art": "",
+    "target": "cell",
+    "text": "Союзная фигура восстанавливает 2 HP (не выше максимума).",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally"
+    },
+    "effects": [
+      {
+        "op": "heal",
+        "amount": 2
+      }
+    ]
+  },
+  {
+    "id": "bless",
+    "name": "Благословение",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник навсегда получает +1 HP (и макс. HP) и +1 атаку.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally"
+    },
+    "effects": [
+      {
+        "op": "buff",
+        "hp": 1,
+        "atk": 1,
+        "duration": "permanent"
+      }
+    ]
+  },
+  {
+    "id": "battle_cry",
+    "name": "Боевой клич",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Все ваши фигуры получают +1 атаки до конца хода.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "buff",
+        "atk": 1,
+        "duration": "turn",
+        "area": "board",
+        "filter": {
+          "owner": "ally"
+        }
+      }
+    ]
+  },
+  {
+    "id": "shield",
+    "name": "Щит",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник защищён: следующий полученный урон полностью поглощается.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "shield",
+        "charges": 1
+      }
+    ]
+  },
+  {
+    "id": "fortress",
+    "name": "Крепость",
+    "cost": 3,
+    "copies": 1,
+    "art": "assets/white_pieces/spr_rook_white.png",
+    "target": "cell",
+    "text": "Ваши фигуры в зоне 3×3 получают Щит.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "shield",
+        "charges": 1,
+        "area": "square3",
+        "filter": {
+          "owner": "ally"
+        }
+      }
+    ]
+  },
+  {
+    "id": "vampirism",
+    "name": "Вампиризм",
+    "cost": 2,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник навсегда лечится на величину урона, нанесённого атакой.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "lifelink"
+      }
+    ]
+  },
+  {
+    "id": "thorns",
+    "name": "Шипы",
+    "cost": 2,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник навсегда возвращает 1 урон каждому, кто его атакует.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "thorns",
+        "damage": 1
+      }
+    ]
+  },
+  {
+    "id": "berserk",
+    "name": "Берсерк",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник получает +2 атаки до конца хода, но теряет 1 HP.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally",
+      "hpMin": 2
+    },
+    "effects": [
+      {
+        "op": "damage",
+        "amount": 1,
+        "pierce": true
+      },
+      {
+        "op": "buff",
+        "atk": 2,
+        "duration": "turn"
+      }
+    ]
+  },
+  {
+    "id": "summon_pawn",
+    "name": "Призыв пешки",
+    "cost": 1,
+    "copies": 3,
+    "art": "assets/white_pieces/spr_pawn_white.png",
+    "target": "cell",
+    "text": "Пешка на пустой клетке в двух ближайших к вам рядах. Действует со следующего хода.",
+    "requires": {
+      "cell": "empty",
+      "zone": "own_home2"
+    },
+    "effects": [
+      {
+        "op": "summon",
+        "type": "pawn",
+        "exhausted": true
+      }
+    ]
+  },
+  {
+    "id": "ghost_rook",
+    "name": "Призрачная ладья",
+    "cost": 3,
+    "copies": 1,
+    "art": "assets/white_pieces/spr_rook_white.png",
+    "target": "cell",
+    "text": "Ладья (3 HP, 2 атаки) в ваших двух рядах. Исчезает через 3 ваших хода.",
+    "requires": {
+      "cell": "empty",
+      "zone": "own_home2"
+    },
+    "effects": [
+      {
+        "op": "summon",
+        "type": "rook",
+        "hp": 3,
+        "atk": 2,
+        "exhausted": true,
+        "status": [
+          {
+            "status": "expire",
+            "turns": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "resurrect",
+    "name": "Воскрешение",
+    "cost": 3,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Верните вашу последнюю павшую фигуру (не короля) на пустую клетку вашей половины с половиной HP.",
+    "requires": {
+      "cell": "empty",
+      "zone": "own_half",
+      "graveyard": "own",
+      "notTypes": [
+        "king"
+      ]
+    },
+    "effects": [
+      {
+        "op": "resurrect",
+        "from": "own",
+        "notTypes": [
+          "king"
+        ],
+        "hp": "half",
+        "exhausted": true
+      }
+    ]
+  },
+  {
+    "id": "necromancy",
+    "name": "Некромантия",
+    "cost": 5,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Поднимите последнюю павшую вражескую фигуру (не короля) на вашей стороне с 2 HP.",
+    "requires": {
+      "cell": "empty",
+      "zone": "own_half",
+      "graveyard": "enemy",
+      "notTypes": [
+        "king"
+      ]
+    },
+    "effects": [
+      {
+        "op": "resurrect",
+        "from": "enemy",
+        "notTypes": [
+          "king"
+        ],
+        "hp": 2,
+        "asOwner": "self",
+        "exhausted": true
+      }
+    ]
+  },
+  {
+    "id": "swap_king",
+    "name": "Спасение короля",
+    "cost": 2,
+    "copies": 1,
+    "art": "assets/white_pieces/spr_king_white.png",
+    "target": "cell",
+    "text": "Поменяйте союзную фигуру местами с вашим королём.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally",
+      "notTypes": [
+        "king"
+      ]
+    },
+    "effects": [
+      {
+        "op": "swap",
+        "with": "own_king"
+      }
+    ]
+  },
+  {
+    "id": "blink",
+    "name": "Мерцание",
+    "cost": 1,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник телепортируется на случайную пустую клетку в радиусе 2.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally"
+    },
+    "effects": [
+      {
+        "op": "teleport",
+        "to": {
+          "random_empty": true,
+          "radius": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "shockwave",
+    "name": "Ударная волна",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Все соседние фигуры отбрасываются на 1 клетку от выбранной. Упёрлись — 1 урон.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "push",
+        "distance": 1,
+        "from": "center",
+        "collisionDamage": 1,
+        "area": "adjacent8",
+        "filter": {
+          "owner": "any"
+        }
+      }
+    ]
+  },
+  {
+    "id": "second_wind",
+    "name": "Второе дыхание",
+    "cost": 3,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Союзник, уже действовавший в этом ходу, может действовать снова.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally",
+      "acted": true
+    },
+    "effects": [
+      {
+        "op": "grant_action",
+        "resetMoveFlag": true
+      }
+    ]
+  },
+  {
+    "id": "freeze",
+    "name": "Заморозка",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Вражеская фигура не может ходить и атаковать в свой следующий ход.",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy"
+    },
+    "effects": [
+      {
+        "op": "set_status",
+        "status": "frozen",
+        "turns": 1
+      }
+    ]
+  },
+  {
+    "id": "knighting",
+    "name": "Рыцарство",
+    "cost": 2,
+    "copies": 2,
+    "art": "assets/white_pieces/spr_knight_white.png",
+    "target": "cell",
+    "text": "Ваша пешка становится конём.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally",
+      "types": [
+        "pawn"
+      ]
+    },
+    "effects": [
+      {
+        "op": "transform",
+        "type": "knight"
+      }
+    ]
+  },
+  {
+    "id": "coronation",
+    "name": "Коронация",
+    "cost": 4,
+    "copies": 1,
+    "art": "assets/white_pieces/spr_queen_white.png",
+    "target": "cell",
+    "text": "Ваша пешка становится ферзём.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally",
+      "types": [
+        "pawn"
+      ]
+    },
+    "effects": [
+      {
+        "op": "transform",
+        "type": "queen"
+      }
+    ]
+  },
+  {
+    "id": "mind_control",
+    "name": "Подчинение",
+    "cost": 5,
+    "copies": 1,
+    "art": "",
+    "target": "cell",
+    "text": "Заберите вражескую фигуру с HP ≤ 2 (кроме короля). В этот ход она не действует.",
+    "requires": {
+      "cell": "piece",
+      "owner": "enemy",
+      "hpMax": 2,
+      "notTypes": [
+        "king"
+      ]
+    },
+    "effects": [
+      {
+        "op": "set_owner",
+        "to": "caster",
+        "exhausted": true
+      }
+    ]
+  },
+  {
+    "id": "insight",
+    "name": "Прозрение",
+    "cost": 1,
+    "copies": 3,
+    "art": "",
+    "target": "cell",
+    "text": "Возьмите 2 карты.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "draw",
+        "count": 2,
+        "who": "self"
+      }
+    ]
+  },
+  {
+    "id": "steal",
+    "name": "Кража",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Заберите случайную карту из руки противника.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "steal_card",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "id": "jam",
+    "name": "Затор",
+    "cost": 2,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "В следующем ходу у противника на 1 темп меньше (минимум 1).",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "tempo_next_turn",
+        "amount": -1,
+        "who": "opponent",
+        "min": 1
+      }
+    ]
+  },
+  {
+    "id": "adrenaline",
+    "name": "Адреналин",
+    "cost": 0,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Сбросьте случайную карту из руки: получите +2 темпа.",
+    "requires": {
+      "cell": "any"
+    },
+    "effects": [
+      {
+        "op": "discard_random",
+        "count": 1,
+        "who": "self",
+        "then": [
+          {
+            "op": "tempo",
+            "amount": 2,
+            "who": "self"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sacrifice",
+    "name": "Жертва",
+    "cost": 0,
+    "copies": 2,
+    "art": "",
+    "target": "cell",
+    "text": "Принесите в жертву свою пешку: возьмите 2 карты и получите +1 темп.",
+    "requires": {
+      "cell": "piece",
+      "owner": "ally",
+      "types": [
+        "pawn"
+      ]
+    },
+    "effects": [
+      {
+        "op": "kill",
+        "then": [
+          {
+            "op": "draw",
+            "count": 2,
+            "who": "self"
+          },
+          {
+            "op": "tempo",
+            "amount": 1,
+            "who": "self"
+          }
+        ]
+      }
+    ]
+  }
+]
+}

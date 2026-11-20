@@ -10,6 +10,7 @@ export default class ButtonView extends Phaser.GameObjects.Container {
     super(scene, 0, 0);
 
     this.onClick = onClick;
+    this.enabled = true;
 
     this.shadow = new Phaser.GameObjects.Rectangle(
       scene,
@@ -59,21 +60,33 @@ export default class ButtonView extends Phaser.GameObjects.Container {
     this.setInteractive({ useHandCursor: true });
 
     this.on('pointerover', () => {
+      if (!this.enabled) {
+        return;
+      }
       this.background.setFillStyle(BORDER_COLOR);
       this.label.setColor('#ffe39a');
     });
 
     this.on('pointerout', () => {
+      if (!this.enabled) {
+        return;
+      }
       this.background.setFillStyle(BUTTON_COLOR);
       this.label.setColor('#ffd166');
       this.setScale(1);
     });
 
     this.on('pointerdown', () => {
+      if (!this.enabled) {
+        return;
+      }
       this.setScale(0.97);
     });
 
     this.on('pointerup', () => {
+      if (!this.enabled) {
+        return;
+      }
       this.setScale(1);
       this.onClick?.();
     });
@@ -85,5 +98,20 @@ export default class ButtonView extends Phaser.GameObjects.Container {
 
   layout(x, y) {
     this.setPosition(x, y);
+  }
+
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    this.setAlpha(enabled ? 1 : 0.5);
+    this.setScale(1);
+
+    if (!enabled) {
+      this.background.setFillStyle(BUTTON_COLOR);
+      this.label.setColor('#ffd166');
+    }
+
+    if (this.input) {
+      this.input.enabled = enabled;
+    }
   }
 }

@@ -99,3 +99,137 @@ describe('Game', () => {
     expect(result.reason).toBe('not-your-turn');
   });
 });
+
+describe('Game attacks', () => {
+  function placeDuel({ attackerType = 'pawn', targetStatus = null } = {}) {
+    const game = new Game();
+    game.pieces = [];
+    const attacker = game.addPiece(attackerType, 3, 4, 'white');
+    const target = game.addPiece('pawn', 4, 3, 'black');
+
+    if (targetStatus) {
+      target.status = { ...targetStatus };
+    }
+
+    return { game, attacker, target };
+  }
+
+  it('uses effective attack including tempAtk', () => {
+    const { game, attacker, target } = placeDuel();
+    attacker.tempAtk = 2;
+    const hpBefore = target.hp;
+
+    const result = game.applyAction({
+      type: 'MOVE',
+      pieceId: attacker.id,
+      col: target.col,
+      row: target.row,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(target.hp).toBe(hpBefore - attacker.effAtk);
+    expect(result.events.find((event) => event.type === 'attack')).toMatchObject(
+      { damage: attacker.effAtk }
+    );
+  });
+
+  it('absorbs an attack with shield and keeps the target alive', () => {
+    const { game, attacker, target } = placeDuel({
+      targetStatus: { shield: { charges: 1 } },
+    });
+    const hpBefore = target.hp;
+
+    const result = game.applyAction({
+      type: 'MOVE',
+      pieceId: attacker.id,
+      col: target.col,
+      row: target.row,
+    });
+
+    expect(result.result).toBe('attack');
+    expect(target.hp).toBe(hpBefore);
+    expect(target.status.shield).toBeUndefined();
+    expect(result.events.some((event) => event.type === 'shield')).toBe(true);
+    expect(game.pieces).toContain(attacker);
+    expect(attacker.col).toBe(3);
+  });
+
+  it('returns thorns damage to the attacker', () => {
+    const { game, attacker, target } = placeDuel({
+      targetStatus: { thorns: { damage: 1 } },
+    });
+    const attackerHpBefore = attacker.hp;
+
+    const result = game.applyAction({
+      type: 'MOVE',
+      pieceId: attacker.id,
+      col: target.col,
+      row: target.row,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(attacker.hp).toBe(attackerHpBefore - 1);
+  });
+
+  it('kills the attacker with thorns before it occupies the cell', () => {
+    const { game, attacker, target } = placeDuel({
+      attackerType: 'king',
+      targetStatus: { thorns: { damage: 10 } },
+    });
+
+    const result = game.applyAction({
+      type: 'MOVE',
+      pieceId: attacker.id,
+      col: target.col,
+      row: target.row,
+    });
+
+    expect(result.result).toBe('kill');
+    expect(game.getPieceById(attacker.id)).toBe(undefined);
+    expect(game.pieces).toContain(target);
+    expect(target.col).toBe(4);
+    expect(target.row).toBe(3);
+    expect(game.gameOver).toEqual({ loser: 'white', winner: 'black' });
+  });
+
+  it('blocks movement of a frozen piece', () => {
+    const game = new Game();
+    const pawn = game.pieces.find(
+      (piece) => piece.type === 'pawn' && piece.color === 'white'
+    );
+    pawn.status.frozen = { turns: 1 };
+
+    const result = game.applyAction({
+      type: 'MOVE',
+      pieceId: pawn.id,
+      col: pawn.col,
+      row: pawn.row - 1,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('frozen');
+    expect(game.getLegalMoves(pawn)).toEqual([]);
+  });
+
+  it('ends the game when an attack removes a king', () => {
+    const game = new Game();
+    game.pieces = [];
+    const attacker = game.addPiece('queen', 4, 4, 'white');
+    const king = game.addPiece('king', 4, 3, 'black');
+    king.hp = 2;
+
+    const result = game.applyAction({
+      type: 'MOVE',
+      pieceId: attacker.id,
+      col: king.col,
+      row: king.row,
+    });
+
+    expect(result.result).toBe('kill');
+    expect(game.gameOver).toEqual({ loser: 'black', winner: 'white' });
+    expect(result.events.some((event) => event.type === 'game_over')).toBe(
+      true
+    );
+    expect(attacker.row).toBe(3);
+  });
+});

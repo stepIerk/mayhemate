@@ -9,6 +9,7 @@ export default class BoardView {
     this.originX = 0;
     this.originY = 0;
     this.cellSize = 0;
+    this.flipped = false;
 
     this.onCellClick = null;
   }
@@ -42,10 +43,12 @@ export default class BoardView {
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
         const color = (row + col) % 2 === 0 ? 0xe69c69 : 0xbf6f4a;
+        const displayCol = this.flipped ? 7 - col : col;
+        const displayRow = this.flipped ? 7 - row : row;
 
         this.cells[row][col].layout(
-          x0 + col * cellSize + cellSize / 2,
-          y0 + row * cellSize + cellSize / 2,
+          x0 + displayCol * cellSize + cellSize / 2,
+          y0 + displayRow * cellSize + cellSize / 2,
           cellSize,
           color
         );
@@ -74,16 +77,22 @@ export default class BoardView {
   }
 
   cellToWorld(col, row) {
+    const displayCol = this.flipped ? 7 - col : col;
+    const displayRow = this.flipped ? 7 - row : row;
+
     return {
-      x: this.originX + col * this.cellSize + this.cellSize / 2,
-      y: this.originY + row * this.cellSize + this.cellSize / 2,
+      x: this.originX + displayCol * this.cellSize + this.cellSize / 2,
+      y: this.originY + displayRow * this.cellSize + this.cellSize / 2,
     };
   }
 
   worldToCell(x, y) {
+    const displayCol = Math.floor((x - this.originX) / this.cellSize);
+    const displayRow = Math.floor((y - this.originY) / this.cellSize);
+
     return {
-      col: Math.floor((x - this.originX) / this.cellSize),
-      row: Math.floor((y - this.originY) / this.cellSize),
+      col: this.flipped ? 7 - displayCol : displayCol,
+      row: this.flipped ? 7 - displayRow : displayRow,
     };
   }
 }
