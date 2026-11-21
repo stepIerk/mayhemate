@@ -28,6 +28,7 @@ export default class GameScene extends Phaser.Scene {
     this.session = data?.session ?? null;
     this.localColor = data?.localColor ?? null;
     this.awaitingResolve = false;
+    this.cardTargeting = false;
     this.isShuttingDown = false;
     this.handedOff = false;
     this.isExiting = false;
@@ -46,6 +47,8 @@ export default class GameScene extends Phaser.Scene {
     this.boardView = new BoardView(this);
     this.boardView.flipped = this.localColor === 'black';
     this.boardView.onCellClick = (col, row) => this.onCellClick(col, row);
+    this.boardView.onCellHover = (col, row, over) =>
+      this.onCellHover(col, row, over);
 
     this.layoutBoard();
     this.syncViewsFromState(this.session.toState());
@@ -157,6 +160,10 @@ export default class GameScene extends Phaser.Scene {
     this.placePieceView(view);
 
     view.on('pointerdown', () => {
+      if (this.cardTargeting) {
+        return;
+      }
+
       const current = this.logic.getPieceById(view.piece.id);
       if (!current || !this.canControl(current)) {
         return;
@@ -214,6 +221,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     this.clearSelection();
+    this.scene.get('BottomUiScene')?.cancelCardTargeting?.();
 
     if (resolved.result === 'move') {
       this.sound.play('move');
@@ -237,7 +245,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   dragStart(gameObject) {
-    if (!gameObject?.piece) {
+    if (!gameObject?.piece || this.cardTargeting) {
       return;
     }
 
@@ -252,7 +260,11 @@ export default class GameScene extends Phaser.Scene {
   }
 
   drag(gameObject, dragX, dragY) {
-    if (!gameObject?.piece || !this.canControl(gameObject.piece)) {
+    if (
+      !gameObject?.piece ||
+      this.cardTargeting ||
+      !this.canControl(gameObject.piece)
+    ) {
       return;
     }
     gameObject.setScale(1.15);
@@ -274,6 +286,11 @@ export default class GameScene extends Phaser.Scene {
       gameObject.x = gameObject.getData('startX');
       gameObject.y = gameObject.getData('startY');
     };
+
+    if (this.cardTargeting) {
+      resetPosition();
+      return;
+    }
 
     if (!this.canControl(piece)) {
       resetPosition();
@@ -364,6 +381,7 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
+    this.scene.get('BottomUiScene')?.cancelCardTargeting?.();
     this.clearSelection();
 
     const result = this.session.dispatch(endTurnAction());
@@ -374,6 +392,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   onCellClick(col, row) {
+    const ui = this.scene.get('BottomUiScene');
+
+    if (ui?.selectedCardUid) {
+      ui.onTargetCellClick?.(col, row);
+      return;
+    }
+
     const piece = this.selectedPiece;
     if (!piece || !this.canControl(piece)) {
       return;
@@ -386,6 +411,33 @@ export default class GameScene extends Phaser.Scene {
 
     this.performAction(piece, col, row);
     this.clearSelection();
+  }
+
+  onCellHover(col, row, over) {
+    if (!this.cardTargeting) {
+      return;
+    }
+
+    this.scene
+      .get('BottomUiScene')
+      ?.onBoardCellHover?.(col, row, over);
+  }
+
+  setCardTargetingMode(active) {
+    const next = Boolean(active);
+
+    if (this.cardTargeting === next) {
+      return;
+    }
+
+    this.cardTargeting = next;
+
+    if (next) {
+      this.selectedPiece = null;
+      this.boardView.clearHighlights();
+    }
+
+    this.syncInputs();
   }
 
   placePieceView(view) {
@@ -402,7 +454,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   canControl(piece) {
-    if (!piece || this.awaitingResolve) {
+    if (!piece || this.awaitingResolve || this.cardTargeting) {
       return false;
     }
 

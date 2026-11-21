@@ -12,6 +12,7 @@ export default class BoardView {
     this.flipped = false;
 
     this.onCellClick = null;
+    this.onCellHover = null;
   }
 
   createCells() {
@@ -23,6 +24,14 @@ export default class BoardView {
 
         cell.on('pointerdown', () => {
           this.onCellClick?.(col, row);
+        });
+
+        cell.on('pointerover', () => {
+          this.onCellHover?.(col, row, true);
+        });
+
+        cell.on('pointerout', () => {
+          this.onCellHover?.(col, row, false);
         });
 
         this.layer.add(cell);

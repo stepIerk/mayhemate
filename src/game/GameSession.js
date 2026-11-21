@@ -75,7 +75,7 @@ export class GameSession {
           t: 'rejected',
           v: PROTOCOL_VERSION,
           reason: rejected.reason,
-          state: rejected.state,
+          state: this.game.toState(this.remoteColor),
           seq: rejected.seq,
         });
       }
@@ -102,6 +102,7 @@ export class GameSession {
         t: 'resolved',
         v: PROTOCOL_VERSION,
         ...resolved,
+        state: this.game.toState(this.remoteColor),
       });
     }
 
@@ -119,7 +120,7 @@ export class GameSession {
           t: 'rejected',
           v: PROTOCOL_VERSION,
           reason: 'not-your-turn',
-          state: this.game.toState(),
+          state: this.game.toState(this.remoteColor),
           seq: this.seq,
         });
         return;

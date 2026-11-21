@@ -47,6 +47,28 @@ function cloneGraveyard(graveyard) {
   };
 }
 
+function redactCards(cardState, viewerColor) {
+  const opponent = viewerColor === 'white' ? 'black' : 'white';
+  const result = {
+    seed: cardState.seed,
+    deck: cardState.deck.map((c) => ({ ...c })),
+    hands: {
+      white: viewerColor === 'white' ? cardState.hands.white.map((c) => ({ ...c })) : [],
+      black: viewerColor === 'black' ? cardState.hands.black.map((c) => ({ ...c })) : [],
+    },
+    discard: cardState.discard.map((c) => ({ ...c })),
+  };
+  // keep own hand; opponent already empty
+  if (viewerColor === 'white') {
+    result.hands.black = [];
+  } else {
+    result.hands.white = [];
+  }
+  // ensure opponent hand hidden
+  result.hands[opponent] = [];
+  return result;
+}
+
 export class Game {
   constructor() {
     this.version = 1;
@@ -75,6 +97,7 @@ export class Game {
     this.graveyard = { white: [], black: [] };
     this.traps = [];
     this.tempoMod = { white: 0, black: 0 };
+    this.tempoModMin = { white: 1, black: 1 };
     this.rngState = Math.floor(Math.random() * 0xffffffff) >>> 0;
     this.nextPieceId = 1;
     this.nextTrapId = 1;
@@ -83,7 +106,9 @@ export class Game {
 
 
   addPiece(type, col, row, color) {
-    const piece = new Piece(this.nextId++, type, col, row, color);
+    const id = this.nextId++;
+    this.nextPieceId = Math.max(this.nextPieceId, id + 1);
+    const piece = new Piece(id, type, col, row, color);
     this.pieces.push(piece);
     return piece;
   }
@@ -117,6 +142,12 @@ export class Game {
 
   applyAction(action) {
     this.eventBuffer = [];
+
+    if (this.gameOver) {
+      this.eventBuffer = null;
+      return { ok: false, reason: 'game-over' };
+    }
+
     const result = this.applyActionInner(action);
 
     if (!result?.ok) {
@@ -464,8 +495,8 @@ export class Game {
     }
   }
 
-  toState() {
-    return {
+  toState(viewerColor = null) {
+    const state = {
       version: this.version,
       turn: this.turn,
       nextId: this.nextId,
@@ -478,15 +509,30 @@ export class Game {
       },
       turnCount: this.turnCount,
       maxTempo: this.maxTempo,
-      cards: this.cards.toState(),
+      cards: viewerColor
+        ? redactCards(this.cards.toState(), viewerColor)
+        : this.cards.toState(),
       graveyard: cloneGraveyard(this.graveyard),
-      traps: this.traps.map((trap) => ({ ...trap })),
+      traps: this.traps
+        .filter((trap) => {
+          if (!viewerColor) {
+            return true;
+          }
+          return (
+            trap.owner === viewerColor ||
+            (Array.isArray(trap.revealedTo) &&
+              trap.revealedTo.includes(viewerColor))
+          );
+        })
+        .map((trap) => ({ ...trap })),
       tempoMod: { ...this.tempoMod },
+      tempoModMin: { ...this.tempoModMin },
       rngState: this.rngState,
       nextPieceId: this.nextPieceId,
       nextTrapId: this.nextTrapId,
       gameOver: this.gameOver ? { ...this.gameOver } : null,
     };
+    return state;
   }
 
   getState() {
@@ -532,8 +578,13 @@ export class Game {
       white: numberOr(state?.tempoMod?.white, 0),
       black: numberOr(state?.tempoMod?.black, 0),
     };
+    game.tempoModMin = {
+      white: numberOr(state?.tempoModMin?.white, 1),
+      black: numberOr(state?.tempoModMin?.black, 1),
+    };
     game.rngState = numberOr(state?.rngState, 0) >>> 0;
-    game.nextPieceId = numberOr(state?.nextPieceId, 1);
+    game.nextPieceId = numberOr(state?.nextPieceId ?? state?.nextId, 1);
+    game.nextId = Math.max(game.nextId, game.nextPieceId);
     game.nextTrapId = numberOr(state?.nextTrapId, 1);
     game.gameOver = state?.gameOver ? { ...state.gameOver } : null;
 
@@ -595,12 +646,14 @@ export class Game {
     this.turn = this.turn === 'white' ? 'black' : 'white';
 
     const mod = this.tempoMod[this.turn];
+    const min = this.tempoModMin[this.turn] ?? 1;
     if (mod !== 0) {
       this.tempoMod[this.turn] = 0;
     }
+    this.tempoModMin[this.turn] = 1;
     const nextTempo = Math.min(
       MAX_MAX_TEMPO,
-      Math.max(1, this.maxTempo + mod)
+      Math.max(min, this.maxTempo + mod)
     );
     this.setTempo(this.turn, nextTempo);
     this.cards.draw(this.turn, 1);

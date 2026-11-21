@@ -6,6 +6,7 @@ import {
   findCardDefinition,
   getCardCatalog,
 } from '../game/deck.js';
+import { validateRequires } from '../game/effects.js';
 
 const END_TURN_BUTTON_WIDTH = 90;
 const END_TURN_BUTTON_HEIGHT = 35;
@@ -31,6 +32,10 @@ const CARD_DRAG_DEPTH = 500;
 const CARD_EVAPORATE_DEPTH = 600;
 const CARD_PILE_DEPTH = 150;
 
+const TARGET_LAYER_DEPTH = 300;
+const TARGET_RING_DEPTH = 700;
+const TARGET_DIM_ALPHA = 0.66;
+
 const DECK_CARD_WIDTH = 44;
 const DECK_CARD_HEIGHT = 60;
 
@@ -54,10 +59,19 @@ export class BottomUiScene extends Phaser.Scene {
     this.currentState = null;
     this.hoveredCard = null;
     this.draggingCard = null;
+    this.cardDragged = false;
+    this.selectedCardUid = null;
+    this.selectedCardView = null;
     this.pressedCard = null;
     this.cardDragOffset = null;
     this.cardTargetCell = null;
     this.pendingState = null;
+
+    this.validTargetKeys = new Set();
+    this.targetPreviewCell = null;
+    this.targetPointerStart = null;
+    this.targetingLayer = null;
+    this.targetingGlowTween = null;
   }
 
   create() {
@@ -130,12 +144,15 @@ export class BottomUiScene extends Phaser.Scene {
 
     this.createCardSparkTexture();
     this.createCardPiles();
+    this.createTargetingLayer();
 
     this.input.on('dragstart', this.onCardDragStart, this);
     this.input.on('drag', this.onCardDrag, this);
     this.input.on('dragend', this.onCardDragEnd, this);
+    this.input.on('pointerdown', this.onScenePointerDown, this);
     this.input.on('pointerup', this.onScenePointerRelease, this);
     this.input.on('pointerupoutside', this.onScenePointerRelease, this);
+    this.input.keyboard?.on('keydown-ESC', this.onEscapeKey, this);
 
     this.layout(this.boardBottomY);
 
@@ -158,8 +175,10 @@ export class BottomUiScene extends Phaser.Scene {
       this.input.off('dragstart', this.onCardDragStart, this);
       this.input.off('drag', this.onCardDrag, this);
       this.input.off('dragend', this.onCardDragEnd, this);
+      this.input.off('pointerdown', this.onScenePointerDown, this);
       this.input.off('pointerup', this.onScenePointerRelease, this);
       this.input.off('pointerupoutside', this.onScenePointerRelease, this);
+      this.input.keyboard?.off('keydown-ESC', this.onEscapeKey, this);
       this.clearCardTarget();
       this.handViews?.clear();
       this.draggingCard = null;
@@ -234,6 +253,168 @@ export class BottomUiScene extends Phaser.Scene {
       .setDepth(CARD_PILE_DEPTH);
   }
 
+  createTargetingLayer() {
+    this.targetingLayer = this.add
+      .container(0, 0)
+      .setDepth(TARGET_LAYER_DEPTH)
+      .setVisible(false)
+      .setAlpha(0);
+
+    const dimAlpha = TARGET_DIM_ALPHA;
+
+    this.dimTop = this.add
+      .rectangle(0, 0, 1, 1, 0x05060a, dimAlpha)
+      .setOrigin(0);
+    this.dimLeft = this.add
+      .rectangle(0, 0, 1, 1, 0x05060a, dimAlpha)
+      .setOrigin(0);
+    this.dimRight = this.add
+      .rectangle(0, 0, 1, 1, 0x05060a, dimAlpha)
+      .setOrigin(0);
+    this.dimBottom = this.add
+      .rectangle(0, 0, 1, 1, 0x05060a, dimAlpha)
+      .setOrigin(0);
+
+    this.boardGlow = this.add
+      .rectangle(0, 0, 1, 1, 0x000000, 0)
+      .setOrigin(0)
+      .setStrokeStyle(3, 0xffd166, 1);
+
+    this.targetHint = this.add
+      .text(0, 0, '', {
+        fontFamily: CARD_FONT,
+        fontSize: '18px',
+        color: '#ffd166',
+        align: 'center',
+        backgroundColor: '#11131a',
+        padding: { x: 14, y: 7 },
+        shadow: {
+          offsetX: 2,
+          offsetY: 2,
+          color: '#000000',
+          blur: 0,
+          fill: true,
+        },
+      })
+      .setOrigin(0.5);
+
+    this.targetCancelHint = this.add
+      .text(0, 0, 'Esc или клик мимо доски — отмена', {
+        fontFamily: CARD_FONT,
+        fontSize: '12px',
+        color: '#9aa0b4',
+        align: 'center',
+      })
+      .setOrigin(0.5);
+
+    this.targetingLayer.add([
+      this.dimTop,
+      this.dimLeft,
+      this.dimRight,
+      this.dimBottom,
+      this.boardGlow,
+      this.targetHint,
+      this.targetCancelHint,
+    ]);
+  }
+
+  layoutTargetingLayer() {
+    if (!this.targetingLayer) {
+      return;
+    }
+
+    const board = this.gameScene?.boardView;
+
+    if (!board || !board.cellSize) {
+      return;
+    }
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const x0 = board.originX;
+    const y0 = board.originY;
+    const size = board.cellSize * 8;
+
+    this.dimTop.setPosition(0, 0).setSize(width, Math.max(0, y0));
+    this.dimLeft
+      .setPosition(0, y0)
+      .setSize(Math.max(0, x0), Math.min(size, height - y0));
+    this.dimRight
+      .setPosition(x0 + size, y0)
+      .setSize(Math.max(0, width - (x0 + size)), Math.min(size, height - y0));
+    this.dimBottom
+      .setPosition(0, y0 + size)
+      .setSize(width, Math.max(0, height - (y0 + size)));
+
+    this.boardGlow.setPosition(x0, y0).setSize(size, size);
+
+    const hintY = y0 >= 48 ? y0 - 26 : y0 + 22;
+    this.targetHint.setPosition(width / 2, hintY);
+    this.targetCancelHint.setPosition(width / 2, hintY + 26);
+  }
+
+  showTargetingLayer(card) {
+    if (!this.targetingLayer) {
+      return;
+    }
+
+    this.layoutTargetingLayer();
+
+    const name = card?.definition?.name ?? '';
+    this.targetHint.setText(
+      name ? `Выберите клетку для «${name}»` : 'Выберите клетку'
+    );
+
+    this.targetingLayer.setVisible(true);
+    this.tweens.killTweensOf(this.targetingLayer);
+    this.tweens.add({
+      targets: this.targetingLayer,
+      alpha: 1,
+      duration: 180,
+      ease: 'Sine.easeOut',
+    });
+
+    this.targetHint.setScale(0.92);
+    this.tweens.add({
+      targets: this.targetHint,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 220,
+      ease: 'Back.easeOut',
+    });
+
+    if (this.targetingGlowTween) {
+      this.targetingGlowTween.remove();
+    }
+
+    this.boardGlow.setAlpha(0.3);
+    this.targetingGlowTween = this.tweens.add({
+      targets: this.boardGlow,
+      alpha: { from: 0.3, to: 1 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  hideTargetingLayer() {
+    if (!this.targetingLayer || !this.targetingLayer.visible) {
+      return;
+    }
+
+    this.targetingGlowTween?.remove();
+    this.targetingGlowTween = null;
+    this.tweens.killTweensOf(this.targetingLayer);
+    this.tweens.add({
+      targets: this.targetingLayer,
+      alpha: 0,
+      duration: 140,
+      ease: 'Sine.easeIn',
+      onComplete: () => this.targetingLayer.setVisible(false),
+    });
+  }
+
   layout(boardBottomY) {
     this.boardBottomY = boardBottomY;
 
@@ -270,6 +451,7 @@ export class BottomUiScene extends Phaser.Scene {
     this.updateTempoLayout();
     this.layoutCardPiles(height);
     this.layoutHand(false);
+    this.layoutTargetingLayer();
   }
 
   layoutCardPiles(panelHeight) {
@@ -361,6 +543,10 @@ export class BottomUiScene extends Phaser.Scene {
     this.handOrder = [];
     this.handSignature = null;
 
+    if (this.selectedCardUid) {
+      this.cancelCardTargeting();
+    }
+
     for (const card of this.handViews.values()) {
       this.tweens.killTweensOf(card);
       card.destroy();
@@ -374,6 +560,10 @@ export class BottomUiScene extends Phaser.Scene {
     this.pressedCard = null;
     this.handColor = color;
     this.handOrder = hand.map((card) => card.uid);
+
+    if (this.selectedCardUid) {
+      this.cancelCardTargeting();
+    }
 
     for (const card of this.handViews.values()) {
       this.tweens.killTweensOf(card);
@@ -517,6 +707,10 @@ export class BottomUiScene extends Phaser.Scene {
       return;
     }
 
+    if (this.selectedCardUid) {
+      return;
+    }
+
     if (over) {
       if (
         this.hoveredCard &&
@@ -616,17 +810,55 @@ export class BottomUiScene extends Phaser.Scene {
       this.hoveredCard = null;
     }
 
+    if (!this.cardDragged && card.playable && this.canPlayCards()) {
+      const wasTargeting = this.selectedCardUid === card.card.uid;
+      const started = this.toggleCardTargeting(card);
+
+      if (!wasTargeting && started) {
+        return;
+      }
+    }
+
     this.homeCard(card, 140);
+  }
+
+  onScenePointerDown(pointer, currentlyOver) {
+    if (pointer.rightButtonDown?.()) {
+      if (this.selectedCardUid) {
+        this.cancelCardTargeting();
+      }
+      return;
+    }
+
+    this.targetPointerStart = {
+      overCard: Boolean(currentlyOver?.some((object) => object?.isCardView)),
+      overBoard: Boolean(this.boardTargetAt(pointer.x, pointer.y)),
+    };
+  }
+
+  onEscapeKey() {
+    if (this.selectedCardUid) {
+      this.cancelCardTargeting();
+    }
   }
 
   onScenePointerRelease(pointer) {
     const card = this.pressedCard;
 
-    if (!card) {
+    if (card) {
+      this.onCardRelease(card, pointer, true);
+    }
+
+    if (!this.selectedCardUid || this.draggingCard) {
       return;
     }
 
-    this.onCardRelease(card, pointer, true);
+    const start = this.targetPointerStart;
+    this.targetPointerStart = null;
+
+    if (start && !start.overCard && !start.overBoard) {
+      this.cancelCardTargeting();
+    }
   }
 
   onCardDragStart(pointer, gameObject) {
@@ -641,12 +873,14 @@ export class BottomUiScene extends Phaser.Scene {
     }
 
     this.draggingCard = card;
+    this.cardDragged = true;
     this.pressedCard = null;
     this.pendingState = null;
     this.cardDragOffset = {
       x: pointer.x - card.x,
       y: pointer.y - card.y,
     };
+    this.dragStartPointer = { x: pointer.x, y: pointer.y };
 
     this.clearCardTarget();
     this.gameScene?.clearSelection?.();
@@ -661,6 +895,8 @@ export class BottomUiScene extends Phaser.Scene {
     card.setDepth(CARD_DRAG_DEPTH);
     card.setRotation(0);
     card.setScale(Math.max(card.homeScale * 1.12, card.scaleX));
+
+    this.beginCardTargeting(card, { liftCard: false });
 
     this.gameScene?.events.emit('ui:card-drag', {
       active: true,
@@ -686,25 +922,40 @@ export class BottomUiScene extends Phaser.Scene {
 
     const card = gameObject;
     this.draggingCard = null;
+    this.cardDragged = false;
     this.cardDragOffset = null;
     this.gameScene?.events.emit('ui:card-drag', { active: false });
 
     if (!card) {
       this.clearCardTarget();
+      this.cancelCardTargeting();
       return;
     }
 
     const target = this.resolveCardTarget(card, pointer);
     this.clearCardTarget();
-    const canPlay = card.playable && this.canPlayCards();
 
-    if (target && canPlay) {
+    const canPlay = card.playable && this.canPlayCards();
+    const start = this.dragStartPointer ?? { x: pointer.x, y: pointer.y };
+    const moved = Math.hypot(pointer.x - start.x, pointer.y - start.y);
+
+    if (target && canPlay && this.isCellValidTarget(target.col, target.row)) {
       this.pendingState = null;
-      this.playCardFromHand(card, target);
+      this.confirmTarget(card, target.col, target.row);
       return;
     }
 
-    this.homeCard(card, 200);
+    if (target && canPlay) {
+      this.flashInvalidTarget(target.col, target.row);
+    } else if (moved >= 12) {
+      this.cancelCardTargeting();
+    }
+
+    if (this.selectedCardUid === card.card.uid) {
+      this.liftSelectedCard(card);
+    } else {
+      this.homeCard(card, 200);
+    }
 
     const pending = this.pendingState;
     this.pendingState = null;
@@ -725,21 +976,254 @@ export class BottomUiScene extends Phaser.Scene {
   }
 
   setCardTarget(target) {
-    const nextCell =
-      target && this.gameScene?.boardView?.cellAt(target.col, target.row);
+    const board = this.gameScene?.boardView;
+    const nextCell = target && board?.cellAt(target.col, target.row);
 
     if (nextCell === this.cardTargetCell) {
       return;
     }
 
-    this.cardTargetCell?.clearHighlight();
+    this.clearCardTarget();
     this.cardTargetCell = nextCell ?? null;
-    this.cardTargetCell?.showHighlight('selected');
+
+    if (nextCell) {
+      const valid = this.isCellValidTarget(nextCell.col, nextCell.row);
+      nextCell.showHighlight(valid ? 'selected' : 'invalid', { pulse: false });
+    }
   }
 
   clearCardTarget() {
-    this.cardTargetCell?.clearHighlight();
+    const cell = this.cardTargetCell;
     this.cardTargetCell = null;
+
+    if (!cell) {
+      return;
+    }
+
+    if (this.selectedCardUid) {
+      this.restoreTargetHighlight(cell);
+    } else {
+      cell.clearHighlight();
+    }
+  }
+
+  beginCardTargeting(card, { liftCard = true } = {}) {
+    if (!card?.playable || card.evaporating || !this.canPlayCards()) {
+      return false;
+    }
+
+    if (this.selectedCardView === card) {
+      return true;
+    }
+
+    this.cancelCardTargeting();
+
+    this.selectedCardUid = card.card.uid;
+    this.selectedCardView = card;
+
+    this.gameScene?.setCardTargetingMode?.(true);
+    this.highlightValidCells(card);
+    this.showTargetingLayer(card);
+
+    if (liftCard) {
+      this.liftSelectedCard(card);
+    }
+
+    this.updateTurnControls(this.session?.toState() ?? { turn: null });
+    return true;
+  }
+
+  cancelCardTargeting() {
+    const card = this.selectedCardView;
+    const wasTargeting = Boolean(this.selectedCardUid);
+
+    this.selectedCardUid = null;
+    this.selectedCardView = null;
+    this.targetPreviewCell = null;
+    this.validTargetKeys.clear();
+
+    if (card && card.active && !card.evaporating && card !== this.draggingCard) {
+      this.homeCard(card, 160);
+    }
+
+    this.clearCardTarget();
+    this.gameScene?.boardView?.clearHighlights();
+    this.gameScene?.setCardTargetingMode?.(false);
+    this.hideTargetingLayer();
+
+    if (wasTargeting) {
+      this.updateTurnControls(this.session?.toState() ?? { turn: null });
+    }
+  }
+
+  highlightValidCells(card) {
+    const game = this.gameScene?.logic;
+    const uiColor = this.session?.localColor ?? game?.turn ?? 'white';
+    const board = this.gameScene?.boardView;
+
+    this.validTargetKeys.clear();
+    this.targetPreviewCell = null;
+
+    if (!game || !board || !card?.definition) {
+      return;
+    }
+
+    board.clearHighlights();
+
+    for (let row = 0; row < 8; row += 1) {
+      for (let col = 0; col < 8; col += 1) {
+        if (validateRequires(game, card.definition.requires, uiColor, col, row)) {
+          this.validTargetKeys.add(`${col},${row}`);
+          board.cellAt(col, row)?.showHighlight('target');
+        }
+      }
+    }
+  }
+
+  isCellValidTarget(col, row) {
+    return this.validTargetKeys.has(`${col},${row}`);
+  }
+
+  restoreTargetHighlight(cell) {
+    if (!cell) {
+      return;
+    }
+
+    if (this.selectedCardUid && this.isCellValidTarget(cell.col, cell.row)) {
+      cell.showHighlight('target');
+    } else {
+      cell.clearHighlight();
+    }
+  }
+
+  onBoardCellHover(col, row, over) {
+    if (!this.selectedCardUid) {
+      return;
+    }
+
+    const cell = this.gameScene?.boardView?.cellAt(col, row);
+
+    if (!cell) {
+      return;
+    }
+
+    if (!over) {
+      if (this.targetPreviewCell === cell) {
+        this.targetPreviewCell = null;
+        this.restoreTargetHighlight(cell);
+      }
+      return;
+    }
+
+    if (this.targetPreviewCell && this.targetPreviewCell !== cell) {
+      this.restoreTargetHighlight(this.targetPreviewCell);
+    }
+
+    this.targetPreviewCell = cell;
+    cell.showHighlight(
+      this.isCellValidTarget(col, row) ? 'selected' : 'invalid',
+      { pulse: false }
+    );
+  }
+
+  flashInvalidTarget(col, row) {
+    const cell = this.gameScene?.boardView?.cellAt(col, row);
+
+    if (!cell) {
+      return;
+    }
+
+    cell.showHighlight('invalid', { pulse: false });
+    this.gameScene?.cameras?.main?.shake(90, 0.0016);
+
+    this.time.delayedCall(340, () => {
+      if (!cell.active) {
+        return;
+      }
+
+      if (this.selectedCardUid) {
+        this.restoreTargetHighlight(cell);
+      } else {
+        cell.clearHighlight();
+      }
+    });
+  }
+
+  onTargetCellClick(col, row) {
+    const card = this.selectedCardView;
+
+    if (!card || !this.selectedCardUid) {
+      return;
+    }
+
+    if (!this.isCellValidTarget(col, row)) {
+      this.flashInvalidTarget(col, row);
+      return;
+    }
+
+    this.confirmTarget(card, col, row);
+  }
+
+  confirmTarget(card, col, row) {
+    this.pulseTargetCell(col, row);
+    this.cancelCardTargeting();
+    this.playCardFromHand(card, { col, row });
+  }
+
+  pulseTargetCell(col, row) {
+    const board = this.gameScene?.boardView;
+    const position = board?.cellToWorld(col, row);
+
+    if (!position || !board?.cellSize) {
+      return;
+    }
+
+    const ring = this.add
+      .circle(position.x, position.y, board.cellSize * 0.3, 0xffd166, 0)
+      .setStrokeStyle(3, 0xffd166, 0.95)
+      .setDepth(TARGET_RING_DEPTH)
+      .setScale(0.6);
+
+    this.tweens.add({
+      targets: ring,
+      scaleX: 2.4,
+      scaleY: 2.4,
+      alpha: 0,
+      duration: 460,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  liftSelectedCard(card) {
+    if (!card || !card.active || card.evaporating) {
+      return;
+    }
+
+    card.setDepth(CARD_HOVER_DEPTH + 5);
+    this.tweenCard(
+      card,
+      {
+        x: card.homeX,
+        y: card.homeY - 16,
+        rotation: 0,
+        scale: card.homeScale * 1.1,
+      },
+      170
+    );
+  }
+
+  toggleCardTargeting(card) {
+    if (!card?.playable || !this.canPlayCards()) {
+      return false;
+    }
+
+    if (this.selectedCardUid === card.card.uid) {
+      this.cancelCardTargeting();
+      return false;
+    }
+
+    return this.beginCardTargeting(card);
   }
 
   boardTargetAt(x, y) {
@@ -917,7 +1401,9 @@ export class BottomUiScene extends Phaser.Scene {
 
     const localColor = this.session?.localColor ?? null;
     const canEndTurn =
-      !this.awaitingResolve && (!localColor || state.turn === localColor);
+      !this.awaitingResolve &&
+      !this.selectedCardUid &&
+      (!localColor || state.turn === localColor);
     this.endTurnButton.setEnabled(canEndTurn);
 
     if (this.turnText) {
